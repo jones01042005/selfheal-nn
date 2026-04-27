@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Self-Healing NN</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Chart.js Injection -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="background-elements">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+    
+    <div class="container">
+        <header>
+            <h1>Self-Healing NN Pipeline</h1>
+            <p>Phase-by-Phase Interactive Edge AI Architecture</p>
+        </header>
+
+        <main>
+            <!-- Setup & Image Upload -->
+            <section class="glass-panel upload-section" style="margin-bottom: 2rem;">
+                
+                <h2 style="margin-top: 1rem;">Setup Conditions</h2>
+                <div class="controls">
+                    <div class="control-group">
+                        <label for="fault-ratio">Injected Fault Ratio</label>
+                        <select id="fault-ratio" name="fault_ratio">
+                            <option value="10">10% Damage</option>
+                            <option value="20" selected>20% Damage</option>
+                            <option value="30">30% Damage</option>
+                            <option value="40">40% Damage</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="upload-dropzone" id="dropzone">
+                    <p>Drag & Drop an image here or <span class="highlight">Click to Browse</span></p>
+                    <input type="file" id="image-upload" accept="image/*" hidden>
+                    <img id="image-preview" src="" alt="Preview" class="hidden">
+                </div>
+            </section>
+
+            <!-- 3-Phase Button Controls -->
+            <section class="glass-panel" style="margin-bottom: 2rem; max-width: 800px; margin-left: auto; margin-right: auto; text-align: center;">
+                <h2>Pipeline Controls</h2>
+                <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1.5rem;">
+                    <button id="btn-1" class="primary-btn" disabled>1. Classify Baseline</button>
+                    <button id="btn-2" class="primary-btn warning-btn" disabled>2. Simulate Fault</button>
+                    <button id="btn-3" class="primary-btn success-btn" disabled>3. Self-Heal</button>
+                </div>
+                <p id="loading-text" class="hidden" style="margin-top: 1rem;"></p>
+            </section>
+
+            <!-- Dynamic Results Panel -->
+            <section class="results-section hidden" id="results-panel">
+                <div class="cards-grid">
+                    <!-- Baseline Card -->
+                    <div class="glass-card result-card" id="card-base" style="opacity: 0.5;">
+                        <div class="card-header">Baseline State</div>
+                        <div class="card-body">
+                            <div class="metric">
+                                <span class="label">Accuracy</span>
+                                <span class="value" id="base-acc">--%</span>
+                            </div>
+                            <div class="metric highlight-metric">
+                                <span class="label">Prediction</span>
+                                <span class="value" id="base-pred">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Faulty Card -->
+                    <div class="glass-card result-card warning" id="card-fault" style="opacity: 0.5;">
+                        <div class="card-header">Hardware Fault</div>
+                        <div class="card-body">
+                            <div class="metric">
+                                <span class="label">Accuracy</span>
+                                <span class="value error-val" id="fault-acc">--%</span>
+                            </div>
+                            <div class="metric highlight-metric">
+                                <span class="label">Prediction</span>
+                                <span class="value" id="fault-pred">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Healed Card -->
+                    <div class="glass-card result-card success" id="card-heal" style="opacity: 0.5;">
+                        <div class="card-header">Healed Network</div>
+                        <div class="card-body">
+                            <div class="metric">
+                                <span class="label">Accuracy</span>
+                                <span class="value success-val" id="heal-acc">--%</span>
+                            </div>
+                            <div class="metric highlight-metric">
+                                <span class="label">Prediction</span>
+                                <span class="value" id="heal-pred">--</span>
+                            </div>
+                            <div class="metric recovery">
+                                <span class="label">Recovery Efficiency</span>
+                                <span class="value" id="heal-rec">--%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="plot-container" class="hidden" style="margin-top: 3rem; text-align: center;">
+                    <h2>Interactive Diagnostics Analysis</h2>
+                    <div style="background: rgba(30, 41, 59, 0.7); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); margin-top: 1rem;">
+                        <canvas id="resultsChart" style="max-height: 400px;"></canvas>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
