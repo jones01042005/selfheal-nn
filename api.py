@@ -276,7 +276,6 @@ def _fast_evaluate(
 ) -> float:
     started = time.perf_counter()
     target_batches = min(max_batches, len(loader))
-    progress_interval = max(1, min(5, target_batches))
     log.info(
         "Accuracy evaluation started (max_batches=%d, available_batches=%d)",
         max_batches,
@@ -288,11 +287,12 @@ def _fast_evaluate(
     correct = 0
     total = 0
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for index, (images, labels) in enumerate(loader):
             if index >= max_batches:
                 break
 
+            batch_started = time.perf_counter()
             labels = labels.to(device)
             batch_correct = 0
             for start in range(
@@ -308,16 +308,15 @@ def _fast_evaluate(
             total += labels.size(0)
 
             completed_batches = index + 1
-            if (
-                completed_batches % progress_interval == 0
-                or completed_batches == target_batches
-            ):
-                log.info(
-                    "Accuracy evaluation progress: %d/%d batches (%.2fs)",
-                    completed_batches,
-                    target_batches,
-                    time.perf_counter() - started,
-                )
+            log.info(
+                "Accuracy evaluation progress: %d/%d batches, "
+                "%d samples (batch %.2fs, total %.2fs)",
+                completed_batches,
+                target_batches,
+                total,
+                time.perf_counter() - batch_started,
+                time.perf_counter() - started,
+            )
 
     if total == 0:
         raise RuntimeError("Accuracy evaluation received no validation samples.")
@@ -336,25 +335,53 @@ def _get_baseline_acc() -> float:
     global _cached_baseline_acc
 
     if _cached_baseline_acc is not None:
+        log.info("Using cached baseline accuracy: %.2f%%", _cached_baseline_acc)
         return _cached_baseline_acc
 
     _, val_loader = _get_data_loaders(include_train=False)
 
     with _baseline_lock:
         if _cached_baseline_acc is None:
-            started = time.perf_counter()
-            log.info("Baseline accuracy evaluation started")
-            _cached_baseline_acc = _fast_evaluate(
-                _baseline_cnn,
-                val_loader,
-                max_batches=EVALUATION_MAX_BATCHES,
+            evaluation_started = time.perf_counter()
+            log.info(
+                "Baseline accuracy evaluation started "
+                "(max_batches=%d, inference_batch_size=%d)",
+                EVALUATION_MAX_BATCHES,
+                EVALUATION_INFERENCE_BATCH_SIZE,
             )
+            try:
+                accuracy = _fast_evaluate(
+                    _baseline_cnn,
+                    val_loader,
+                    max_batches=EVALUATION_MAX_BATCHES,
+                )
+            except MemoryError as exc:
+                log.exception(
+                    "Baseline accuracy evaluation ran out of memory"
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Baseline accuracy evaluation ran out of memory. "
+                        "Retry later or use an instance with more memory."
+                    ),
+                ) from exc
+            except Exception as exc:
+                log.exception("Baseline accuracy evaluation failed")
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Baseline accuracy evaluation failed. "
+                        "Check server logs for the traceback."
+                    ),
+                ) from exc
 
+            _cached_baseline_acc = accuracy
             log.info(
                 "Baseline accuracy evaluation completed and cached: "
                 "%.2f%% in %.2fs",
                 _cached_baseline_acc,
-                time.perf_counter() - started,
+                time.perf_counter() - evaluation_started,
             )
 
     return _cached_baseline_acc

@@ -54,7 +54,9 @@ The API loads only the validation dataset for baseline/fault evaluation and
 loads the training dataset only for healing. CIFAR-10 is prepared in the
 container image, not downloaded during a request. Baseline, faulty, and healed
 accuracy use the same 20 validation batches (2,560 samples) with inference
-chunked into groups of 16 to reduce peak memory. Autoencoder checkpoints are
+chunked into groups of 16 and `torch.inference_mode()` to reduce inference
+overhead and peak memory; the evaluation sample count is unchanged. Per-batch
+timing and failures are recorded in the API logs. Autoencoder checkpoints are
 loaded only when an autoencoder-based healing strategy is selected.
 
 ---
