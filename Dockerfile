@@ -62,4 +62,3 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # Use uvicorn with a single worker (avoids duplicating the large model in RAM)
 CMD ["sh", "-c", "exec python -m uvicorn api:app --host 0.0.0.0 --port \"${PORT:-8000}\" --workers 1 --timeout-keep-alive 120"]
-the 
