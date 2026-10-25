@@ -34,8 +34,9 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Prepare CIFAR-10 before copying application files so this layer can be reused
 # when only the API or frontend changes.
+COPY prepare_cifar10.py ./
 RUN mkdir -p datasets experiments \
-    && python -c "import os; from torchvision.datasets import CIFAR10; root='/app/datasets'; CIFAR10(root=root, train=True, download=True); CIFAR10(root=root, train=False, download=True); os.remove(os.path.join(root, 'cifar-10-python.tar.gz'))"
+    && python prepare_cifar10.py
 
 # Copy application source
 COPY ae_model.py ./

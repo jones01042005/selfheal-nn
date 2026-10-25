@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from train import CNN, get_val_loader, get_train_loader
+from train import CNN, DATA_DIR, get_val_loader, get_train_loader
 from fault import inject_weight_fault, detect_low_gradient_weights
 from heal import (
     targeted_heal_topk_gradient,
@@ -248,13 +248,18 @@ def _get_data_loaders(include_train=True):
                 )
 
         except Exception as exc:
-            log.exception("CIFAR-10 data-loader initialization failed")
+            log.exception(
+                "CIFAR-10 data-loader initialization failed for %s. "
+                "API requests do not download missing data; include valid "
+                "train and test batches in the container image.",
+                DATA_DIR,
+            )
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "CIFAR-10 data is unavailable. Confirm that the "
-                    "training and validation datasets are present in the "
-                    "container image, then retry."
+                    "CIFAR-10 train or validation data is missing or "
+                    f"incomplete at {DATA_DIR}. Redeploy an image with valid "
+                    "CIFAR-10 data; the API does not download it per request."
                 ),
             ) from exc
 
