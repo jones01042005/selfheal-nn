@@ -50,6 +50,13 @@ An interactive demonstration of **self-healing neural network techniques** appli
 
 Baseline accuracy: **~85%** on CIFAR-10 test set.
 
+The API loads only the validation dataset for baseline/fault evaluation and
+loads the training dataset only for healing. CIFAR-10 is prepared in the
+container image, not downloaded during a request. Baseline, faulty, and healed
+accuracy use the same 20 validation batches (2,560 samples) with inference
+chunked into groups of 16 to reduce peak memory. Autoencoder checkpoints are
+loaded only when an autoencoder-based healing strategy is selected.
+
 ---
 
 ## Healing Strategies

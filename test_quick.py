@@ -26,7 +26,7 @@ def post_multipart(url, fields, file_path=None):
         return json.loads(e.read()), e.code
 
 IMG = 'test_images/OIP.jpeg'
-BASE = 'http://localhost:8000'
+BASE = os.getenv('API_BASE', 'http://localhost:8000')
 PASS = '\033[92mPASS\033[0m'
 FAIL = '\033[91mFAIL\033[0m'
 errors = 0
@@ -43,7 +43,8 @@ print('\n=== Test 1: Health ===')
 d, c = post_multipart.__module__ and (lambda: (json.loads(urllib.request.urlopen(BASE+'/api/health').read()), 200))()
 check('status ok', d.get('status') == 'ok', str(d))
 check('baseline_checkpoint true', d.get('baseline_checkpoint') is True)
-check('autoencoders_loaded true', d.get('autoencoders_loaded') is True)
+check('autoencoder checkpoints available', d.get('autoencoders_available') is True)
+check('autoencoders remain lazy-loaded', d.get('autoencoders_loaded') is False)
 
 print('\n=== Test 2: Methods ===')
 d, _ = (json.loads(urllib.request.urlopen(BASE+'/api/methods').read()), 200)

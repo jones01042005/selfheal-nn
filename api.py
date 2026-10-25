@@ -3,7 +3,7 @@
 SelfHealingNN — FastAPI Backend
 Production-oriented API for CIFAR-10 fault injection and healing.
 
-The CNN and autoencoders are loaded at startup.
+The CNN is loaded at startup; autoencoders are loaded on demand.
 CIFAR-10 data loaders are initialized lazily on the first request that
 requires dataset evaluation or training-based healing.
 """
@@ -67,6 +67,7 @@ STATIC_DIR = os.path.join(PROJECT_ROOT, "static")
 
 VALID_FAULT_RATIOS = {10, 20, 30, 40}
 EVALUATION_MAX_BATCHES = 20
+EVALUATION_INFERENCE_BATCH_SIZE = 16
 
 VALID_METHODS = {
     "gradient",
@@ -136,16 +137,21 @@ log.info("Baseline CNN loaded successfully")
 
 _ae_fc1: Optional[WeightAutoencoder] = None
 _ae_fc2: Optional[WeightAutoencoder] = None
-_ae_available = False
+_autoencoder_lock = threading.Lock()
+_ae_available = (
+    os.path.isfile(AE_FC1_PATH)
+    and os.path.isfile(AE_FC2_PATH)
+)
+_ae_loaded = False
 
 
 def _load_autoencoders() -> bool:
-    global _ae_fc1, _ae_fc2
+    global _ae_fc1, _ae_fc2, _ae_loaded
 
-    if not (
-        os.path.isfile(AE_FC1_PATH)
-        and os.path.isfile(AE_FC2_PATH)
-    ):
+    if _ae_loaded:
+        return True
+
+    if not _ae_available:
         log.warning(
             "Autoencoder checkpoints missing. "
             "AE-dependent methods will be unavailable."
@@ -167,6 +173,7 @@ def _load_autoencoders() -> bool:
 
         _ae_fc1 = model1
         _ae_fc2 = model2
+        _ae_loaded = True
 
         log.info("Both autoencoder checkpoints loaded successfully")
         return True
@@ -175,10 +182,16 @@ def _load_autoencoders() -> bool:
         log.exception("Could not load autoencoder checkpoints")
         _ae_fc1 = None
         _ae_fc2 = None
+        _ae_loaded = False
         return False
 
 
-_ae_available = _load_autoencoders()
+def _ensure_autoencoders_loaded() -> bool:
+    if _ae_loaded:
+        return True
+
+    with _autoencoder_lock:
+        return _load_autoencoders()
 
 
 # ---------------------------------------------------------------------------
@@ -280,12 +293,18 @@ def _fast_evaluate(
             if index >= max_batches:
                 break
 
-            images = images.to(device)
             labels = labels.to(device)
+            batch_correct = 0
+            for start in range(
+                0, images.size(0), EVALUATION_INFERENCE_BATCH_SIZE
+            ):
+                end = start + EVALUATION_INFERENCE_BATCH_SIZE
+                image_chunk = images[start:end].to(device)
+                label_chunk = labels[start:end]
+                predictions = model(image_chunk).argmax(dim=1)
+                batch_correct += (predictions == label_chunk).sum().item()
 
-            predictions = model(images).argmax(dim=1)
-
-            correct += (predictions == labels).sum().item()
+            correct += batch_correct
             total += labels.size(0)
 
             completed_batches = index + 1
@@ -389,7 +408,7 @@ def _apply_healing(
         )
 
     elif method == "ae_dual":
-        if not _ae_available:
+        if not _ensure_autoencoders_loaded():
             raise HTTPException(
                 status_code=503,
                 detail="Autoencoder checkpoints are unavailable.",
@@ -400,7 +419,7 @@ def _apply_healing(
         )
 
     elif method == "hybrid":
-        if not _ae_available:
+        if not _ensure_autoencoders_loaded():
             raise HTTPException(
                 status_code=503,
                 detail="Autoencoder checkpoints are unavailable.",
@@ -522,7 +541,8 @@ async def health():
         "status": "ok",
         "device": str(device),
         "baseline_checkpoint": os.path.isfile(MODEL_PATH),
-        "autoencoders_loaded": _ae_available,
+        "autoencoders_available": _ae_available,
+        "autoencoders_loaded": _ae_loaded,
         "data_loaders_initialized": (
             _train_loader is not None and _val_loader is not None
         ),
@@ -581,6 +601,7 @@ async def methods():
     return {
         "methods": all_methods,
         "autoencoders_available": _ae_available,
+        "autoencoders_loaded": _ae_loaded,
     }
 
 
