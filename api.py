@@ -193,43 +193,55 @@ _val_loader = None
 _data_loader_lock = threading.Lock()
 
 
-def _get_data_loaders():
+def _get_data_loaders(include_train=True):
     """
-    Initialize CIFAR-10 data loaders on demand.
+    Initialize the required CIFAR-10 data loaders on demand.
 
-    The lock prevents simultaneous first requests from initializing the
-    data loaders more than once. Failed initialization can be retried.
+    The baseline and fault endpoints need only validation data. Healing also
+    needs training data. Each loader is cached only after it initializes.
     """
     global _train_loader, _val_loader
 
-    if _train_loader is not None and _val_loader is not None:
+    if _val_loader is not None and (
+        not include_train or _train_loader is not None
+    ):
         return _train_loader, _val_loader
 
     with _data_loader_lock:
-        # Check again after acquiring the lock.
-        if _train_loader is not None and _val_loader is not None:
+        if _val_loader is not None and (
+            not include_train or _train_loader is not None
+        ):
             return _train_loader, _val_loader
 
-        log.info("Initializing CIFAR-10 data loaders on demand ...")
-
         try:
-            train_loader = get_train_loader()
-            val_loader = get_val_loader()
+            if _val_loader is None:
+                started = time.perf_counter()
+                log.info("Validation data-loader initialization started")
+                val_loader = get_val_loader(download=False)
+                _val_loader = val_loader
+                log.info(
+                    "Validation data loader initialized in %.2fs",
+                    time.perf_counter() - started,
+                )
 
-            # Cache only after both loaders initialize successfully.
-            _train_loader = train_loader
-            _val_loader = val_loader
-
-            log.info("CIFAR-10 data loaders initialized successfully")
+            if include_train and _train_loader is None:
+                started = time.perf_counter()
+                log.info("Training data-loader initialization started")
+                train_loader = get_train_loader(download=False)
+                _train_loader = train_loader
+                log.info(
+                    "Training data loader initialized in %.2fs",
+                    time.perf_counter() - started,
+                )
 
         except Exception as exc:
-            log.exception("CIFAR-10 data loader initialization failed")
+            log.exception("CIFAR-10 data-loader initialization failed")
             raise HTTPException(
                 status_code=503,
                 detail=(
-                    "CIFAR-10 data is currently unavailable. "
-                    "Check dataset download access and server logs, "
-                    "then retry."
+                    "CIFAR-10 data is unavailable. Confirm that the "
+                    "training and validation datasets are present in the "
+                    "container image, then retry."
                 ),
             ) from exc
 
@@ -249,6 +261,15 @@ def _fast_evaluate(
     loader,
     max_batches: int = EVALUATION_MAX_BATCHES,
 ) -> float:
+    started = time.perf_counter()
+    target_batches = min(max_batches, len(loader))
+    progress_interval = max(1, min(5, target_batches))
+    log.info(
+        "Accuracy evaluation started (max_batches=%d, available_batches=%d)",
+        max_batches,
+        len(loader),
+    )
+
     model.eval()
 
     correct = 0
@@ -267,7 +288,29 @@ def _fast_evaluate(
             correct += (predictions == labels).sum().item()
             total += labels.size(0)
 
-    return 100.0 * correct / total if total else 0.0
+            completed_batches = index + 1
+            if (
+                completed_batches % progress_interval == 0
+                or completed_batches == target_batches
+            ):
+                log.info(
+                    "Accuracy evaluation progress: %d/%d batches (%.2fs)",
+                    completed_batches,
+                    target_batches,
+                    time.perf_counter() - started,
+                )
+
+    if total == 0:
+        raise RuntimeError("Accuracy evaluation received no validation samples.")
+
+    accuracy = 100.0 * correct / total
+    log.info(
+        "Accuracy evaluation completed: %.2f%% over %d samples in %.2fs",
+        accuracy,
+        total,
+        time.perf_counter() - started,
+    )
+    return accuracy
 
 
 def _get_baseline_acc() -> float:
@@ -276,10 +319,12 @@ def _get_baseline_acc() -> float:
     if _cached_baseline_acc is not None:
         return _cached_baseline_acc
 
-    _, val_loader = _get_data_loaders()
+    _, val_loader = _get_data_loaders(include_train=False)
 
     with _baseline_lock:
         if _cached_baseline_acc is None:
+            started = time.perf_counter()
+            log.info("Baseline accuracy evaluation started")
             _cached_baseline_acc = _fast_evaluate(
                 _baseline_cnn,
                 val_loader,
@@ -287,8 +332,10 @@ def _get_baseline_acc() -> float:
             )
 
             log.info(
-                "Cached baseline accuracy: %.2f%%",
+                "Baseline accuracy evaluation completed and cached: "
+                "%.2f%% in %.2fs",
                 _cached_baseline_acc,
+                time.perf_counter() - started,
             )
 
     return _cached_baseline_acc
@@ -479,6 +526,8 @@ async def health():
         "data_loaders_initialized": (
             _train_loader is not None and _val_loader is not None
         ),
+        "training_loader_initialized": _train_loader is not None,
+        "validation_loader_initialized": _val_loader is not None,
     }
 
 
@@ -537,12 +586,35 @@ async def methods():
 
 @app.post("/api/baseline")
 async def run_baseline(image: UploadFile = File(...)):
-    file_bytes = await image.read()
-    image_tensor = _decode_image(file_bytes)
+    request_started = time.perf_counter()
+    log.info("Baseline request received")
 
-    # Dataset initialization occurs only when accuracy is requested.
+    read_started = time.perf_counter()
+    file_bytes = await image.read()
+    log.info(
+        "Baseline image received (%d bytes) in %.2fs",
+        len(file_bytes),
+        time.perf_counter() - read_started,
+    )
+
+    decode_started = time.perf_counter()
+    image_tensor = _decode_image(file_bytes)
+    log.info(
+        "Baseline image decoding completed in %.2fs",
+        time.perf_counter() - decode_started,
+    )
+
     baseline_acc = _get_baseline_acc()
+    prediction_started = time.perf_counter()
     label, confidence = _predict(_baseline_cnn, image_tensor)
+    log.info(
+        "Baseline image prediction completed in %.2fs",
+        time.perf_counter() - prediction_started,
+    )
+    log.info(
+        "Baseline request completed in %.2fs",
+        time.perf_counter() - request_started,
+    )
 
     return {
         "accuracy": round(baseline_acc, 2),
@@ -566,7 +638,7 @@ async def run_fault(
     image_tensor = _decode_image(file_bytes)
 
     # The loader is initialized only when this endpoint is used.
-    _, val_loader = _get_data_loaders()
+    _, val_loader = _get_data_loaders(include_train=False)
 
     faulty_model = copy.deepcopy(_baseline_cnn)
     faulty_model = inject_weight_fault(
@@ -718,6 +790,38 @@ async def run_heal(
 
 @app.exception_handler(Exception)
 async def global_error_handler(request: Request, exc: Exception):
+    message = str(exc).lower()
+    memory_exhausted = isinstance(exc, MemoryError) or (
+        isinstance(exc, RuntimeError)
+        and any(
+            marker in message
+            for marker in (
+                "out of memory",
+                "cannot allocate memory",
+                "can't allocate memory",
+                "failed to allocate",
+            )
+        )
+    )
+
+    if memory_exhausted:
+        log.critical(
+            "Memory exhaustion while handling %s %s; "
+            "the deployment may need more memory.",
+            request.method,
+            request.url.path,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": (
+                    "The request exceeded available backend memory. "
+                    "Retry on an instance with more memory."
+                )
+            },
+        )
+
     log.error(
         "Unhandled error on %s %s: %s",
         request.method,

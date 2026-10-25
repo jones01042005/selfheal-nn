@@ -281,10 +281,46 @@ function buildFormData(extras = {}) {
 async function apiPost(path, formData) {
     const url = API_BASE + path;
     const res = await fetch(url, { method: 'POST', body: formData });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-        throw new Error(data.error || data.detail || `HTTP ${res.status}`);
+
+    let responseBody;
+    try {
+        responseBody = await res.text();
+    } catch {
+        throw new Error(`Unable to read server response (HTTP ${res.status}).`);
     }
+
+    let data = null;
+    if (responseBody.trim()) {
+        try {
+            data = JSON.parse(responseBody);
+        } catch {
+            const bodyPreview = responseBody.trim().slice(0, 240);
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}: ${bodyPreview}`);
+            }
+            throw new Error(`Invalid JSON response (HTTP ${res.status}).`);
+        }
+    }
+
+    if (!res.ok) {
+        const detail = data && (data.detail || data.error);
+        const message = typeof detail === 'string'
+            ? detail
+            : detail
+                ? JSON.stringify(detail)
+                : responseBody.trim()
+                    ? responseBody.trim().slice(0, 240)
+                    : 'The server returned an empty response.';
+        throw new Error(`HTTP ${res.status}: ${message}`);
+    }
+
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error(`Invalid or empty server response (HTTP ${res.status}).`);
+    }
+    if (data.error) {
+        throw new Error(String(data.error));
+    }
+
     return data;
 }
 

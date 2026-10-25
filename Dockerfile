@@ -32,6 +32,11 @@ RUN pip install --no-cache-dir --upgrade pip \
         --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 
+# Prepare CIFAR-10 before copying application files so this layer can be reused
+# when only the API or frontend changes.
+RUN mkdir -p datasets experiments \
+    && python -c "import os; from torchvision.datasets import CIFAR10; root='/app/datasets'; CIFAR10(root=root, train=True, download=True); CIFAR10(root=root, train=False, download=True); os.remove(os.path.join(root, 'cifar-10-python.tar.gz'))"
+
 # Copy application source
 COPY ae_model.py ./
 COPY train.py ./
@@ -48,9 +53,6 @@ COPY models/autoencoders/ae_fc2.pth models/autoencoders/
 
 # Copy frontend assets
 COPY static/ static/
-
-# Create runtime directories
-RUN mkdir -p datasets experiments
 
 # Set permissions
 RUN chown -R appuser:appuser /app

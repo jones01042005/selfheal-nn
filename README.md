@@ -117,14 +117,18 @@ Visit `http://localhost:8000` (the API also serves the frontend and its assets).
 docker build -t selfhealingnn .
 ```
 
+The build downloads and verifies the CIFAR-10 training and test sets into the
+image. The API uses those files with `download=False`, so an inference request
+does not need network access or write dataset files to the Render filesystem.
+
 ### Run the container
 ```bash
-docker run -p 8000:8000 selfhealingnn
+docker run -p 10000:10000 selfhealingnn
 ```
 
 ### Test health endpoint
 ```bash
-curl http://localhost:8000/api/health
+curl http://localhost:10000/api/health
 ```
 
 Expected response:
@@ -196,7 +200,7 @@ The service's `PORT` is supplied by Render and the container listens on it. Loca
 | `/api/heal` | POST | `image: File, fault_ratio: int, method: str` | Full heal pipeline + metrics |
 | `/api/docs` | GET | — | Swagger interactive docs |
 
-Full interactive docs: `http://localhost:8000/api/docs`
+Full interactive docs: `http://localhost:10000/api/docs`
 
 ---
 
@@ -206,7 +210,7 @@ Full interactive docs: `http://localhost:8000/api/docs`
 |---|---|---|
 | `FRONTEND_URL` | Backend (Render) | `https://your-app.vercel.app` |
 | `BACKEND_URL` | Frontend (Vercel build environment) | `https://your-api.onrender.com` |
-| `PORT` | Backend | Supplied by the container host; defaults to `8000` for local Docker runs |
+| `PORT` | Backend | Supplied by the container host; defaults to `10000` |
 
 ---
 

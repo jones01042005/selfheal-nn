@@ -94,7 +94,7 @@ class CNN(nn.Module):
 # -------------------------------------------------
 # Data Loaders (Optimized for Edge Simulation)
 # -------------------------------------------------
-def get_train_loader(batch_size=128):
+def get_train_loader(batch_size=128, download=True):
     transform = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -109,7 +109,7 @@ def get_train_loader(batch_size=128):
     trainset = torchvision.datasets.CIFAR10(
         root=DATA_DIR,
         train=True,
-        download=True, 
+        download=download,
         transform=transform
     )
 
@@ -122,7 +122,7 @@ def get_train_loader(batch_size=128):
     )
 
 
-def get_val_loader(batch_size=128):
+def get_val_loader(batch_size=128, download=True):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(
@@ -134,7 +134,7 @@ def get_val_loader(batch_size=128):
     testset = torchvision.datasets.CIFAR10(
         root=DATA_DIR,
         train=False,
-        download=True,
+        download=download,
         transform=transform
     )
 
