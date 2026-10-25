@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SelfHealingNN — Neural Network Fault Recovery Demo</title>
+    <meta name="description" content="Interactive demonstration of self-healing neural network techniques for CIFAR-10 image classification. Inject faults and watch AI recover.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/chart.min.js"></script>
+    <script src="/static/config.js"></script>
+</head>
+<body>
+    <!-- Animated background -->
+    <div class="bg-canvas" aria-hidden="true">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="grid-overlay"></div>
+    </div>
+
+    <div class="page-wrapper">
+
+        <!-- ── Hero Header ────────────────────────────────────── -->
+        <header class="site-header">
+            <div class="logo-mark">
+                <span class="logo-icon">⬡</span>
+                <span class="logo-text">SelfHealingNN</span>
+                <span class="version-badge">v2.0</span>
+            </div>
+            <h1 class="hero-title">
+                <span class="gradient-text">Self-Healing</span>
+                Neural Networks
+            </h1>
+            <p class="hero-sub">
+                Inject hardware faults into a CIFAR-10 CNN and observe how autonomous healing strategies restore accuracy in real time.
+            </p>
+            <div class="hero-tags">
+                <span class="tag">PyTorch CNN</span>
+                <span class="tag">CIFAR-10</span>
+                <span class="tag">7 Healing Strategies</span>
+                <span class="tag">Edge AI</span>
+            </div>
+        </header>
+
+        <!-- ── Main Pipeline ─────────────────────────────────── -->
+        <main>
+
+            <!-- Step 1: Configuration -->
+            <section class="panel config-panel" id="section-config">
+                <div class="panel-label"><span class="step-dot">01</span> Configure Experiment</div>
+
+                <div class="config-grid">
+                    <!-- Image Upload -->
+                    <div class="config-col">
+                        <label class="field-label">Test Image</label>
+                        <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Upload image">
+                            <div class="dropzone-inner" id="dropzone-inner">
+                                <div class="upload-icon">📷</div>
+                                <p class="dz-text">Drag &amp; drop any image<br>or <span class="dz-link">click to browse</span></p>
+                                <p class="dz-hint">PNG · JPG · WEBP — resized to 32×32 for CIFAR-10</p>
+                            </div>
+                            <img id="image-preview" class="img-preview hidden" alt="Preview">
+                            <input type="file" id="image-upload" accept="image/*" hidden>
+                        </div>
+                    </div>
+
+                    <!-- Sliders + Method -->
+                    <div class="config-col">
+                        <div class="field-group">
+                            <label class="field-label" for="fault-ratio">
+                                Fault Percentage
+                                <span class="field-badge" id="fault-badge">20%</span>
+                            </label>
+                            <div class="slider-row">
+                                <span class="slider-tick">10%</span>
+                                <input type="range" id="fault-ratio" min="1" max="4" step="1" value="2" class="slider">
+                                <span class="slider-tick">40%</span>
+                            </div>
+                            <div class="slider-labels">
+                                <span>10</span><span>20</span><span>30</span><span>40</span>
+                            </div>
+                            <p class="field-hint">Percentage of model weights set to zero to simulate hardware damage.</p>
+                        </div>
+
+                        <div class="field-group" style="margin-top:1.5rem">
+                            <label class="field-label" for="heal-method">Healing Strategy</label>
+                            <select id="heal-method" class="select-field">
+                                <option value="adaptive">🤖 Adaptive Controller (auto-selects best)</option>
+                                <option value="gradient">📉 Gradient-Based Repair</option>
+                                <option value="regrowth">🌱 Neuron Regrowth</option>
+                                <option value="regrowth_gradient">🌱📉 Regrowth + Gradient</option>
+                                <option value="rerouting">🔀 Dynamic Rerouting</option>
+                                <option value="ae_dual">🔁 Dual AE Reconstruction</option>
+                                <option value="hybrid">⚡ Hybrid (AE + Gradient)</option>
+                            </select>
+                            <p class="field-hint" id="method-hint">Automatically picks the optimal strategy per fault severity.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Method descriptions (hidden, populated by JS) -->
+                <div id="method-info" class="method-info-card hidden">
+                    <div class="mi-icon" id="mi-icon">🤖</div>
+                    <div>
+                        <div class="mi-title" id="mi-title">Adaptive Controller</div>
+                        <div class="mi-desc" id="mi-desc">Automatically selects the best healing strategy based on fault severity.</div>
+                    </div>
+                    <div class="mi-badge" id="mi-ae-badge" style="display:none">Requires AE</div>
+                </div>
+            </section>
+
+            <!-- Step 2: Pipeline Controls -->
+            <section class="panel controls-panel" id="section-controls">
+                <div class="panel-label"><span class="step-dot">02</span> Run Pipeline</div>
+                <div class="pipeline-buttons">
+                    <button id="btn-baseline" class="pipe-btn btn-blue" disabled>
+                        <span class="btn-icon">🔍</span>
+                        <span class="btn-text">
+                            <span class="btn-num">Step 1</span>
+                            <span class="btn-label">Classify Baseline</span>
+                        </span>
+                    </button>
+                    <div class="pipe-arrow">→</div>
+                    <button id="btn-fault" class="pipe-btn btn-red" disabled>
+                        <span class="btn-icon">⚡</span>
+                        <span class="btn-text">
+                            <span class="btn-num">Step 2</span>
+                            <span class="btn-label">Inject Fault</span>
+                        </span>
+                    </button>
+                    <div class="pipe-arrow">→</div>
+                    <button id="btn-heal" class="pipe-btn btn-green" disabled>
+                        <span class="btn-icon">🩺</span>
+                        <span class="btn-text">
+                            <span class="btn-num">Step 3</span>
+                            <span class="btn-label">Self-Heal</span>
+                        </span>
+                    </button>
+                </div>
+
+                <!-- Status bar -->
+                <div id="status-bar" class="status-bar hidden">
+                    <div class="status-spinner"></div>
+                    <span id="status-text">Working…</span>
+                </div>
+                <div id="error-bar" class="error-bar hidden">
+                    <span class="error-icon">⚠</span>
+                    <span id="error-text">Something went wrong.</span>
+                </div>
+            </section>
+
+            <!-- Step 3: Results -->
+            <section class="panel results-panel hidden" id="section-results">
+                <div class="panel-label"><span class="step-dot">03</span> Results</div>
+
+                <!-- Metric Cards -->
+                <div class="metric-cards" id="metric-cards">
+
+                    <div class="metric-card card-blue pending" id="card-baseline">
+                        <div class="card-glow"></div>
+                        <div class="card-icon">🧠</div>
+                        <div class="card-phase">Baseline</div>
+                        <div class="card-acc" id="baseline-acc">—</div>
+                        <div class="card-acc-label">Accuracy</div>
+                        <div class="card-pred">
+                            <span class="pred-label">Predicted</span>
+                            <span class="pred-val" id="baseline-pred">—</span>
+                        </div>
+                        <div class="card-state pending-state">Waiting…</div>
+                    </div>
+
+                    <div class="metric-card card-red pending" id="card-fault">
+                        <div class="card-glow"></div>
+                        <div class="card-icon">💀</div>
+                        <div class="card-phase">Faulty</div>
+                        <div class="card-acc" id="fault-acc">—</div>
+                        <div class="card-acc-label">Accuracy</div>
+                        <div class="card-pred">
+                            <span class="pred-label">Predicted</span>
+                            <span class="pred-val" id="fault-pred">—</span>
+                        </div>
+                        <div class="card-state pending-state">Waiting…</div>
+                    </div>
+
+                    <div class="metric-card card-green pending" id="card-healed">
+                        <div class="card-glow"></div>
+                        <div class="card-icon">💚</div>
+                        <div class="card-phase">Healed</div>
+                        <div class="card-acc" id="healed-acc">—</div>
+                        <div class="card-acc-label">Accuracy</div>
+                        <div class="card-pred">
+                            <span class="pred-label">Predicted</span>
+                            <span class="pred-val" id="healed-pred">—</span>
+                        </div>
+                        <div class="recovery-row hidden" id="recovery-row">
+                            <span class="rec-label">Recovery</span>
+                            <span class="rec-val" id="recovery-val">—</span>
+                        </div>
+                        <div class="card-state pending-state">Waiting…</div>
+                    </div>
+                </div>
+
+                <!-- Summary Row (after heal) -->
+                <div class="summary-row hidden" id="summary-row">
+                    <div class="summary-item">
+                        <span class="si-label">Method Used</span>
+                        <span class="si-val" id="sum-method">—</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="si-label">Fault Level</span>
+                        <span class="si-val" id="sum-fault">—</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="si-label">Accuracy Drop</span>
+                        <span class="si-val si-red" id="sum-drop">—</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="si-label">Accuracy Gain</span>
+                        <span class="si-val si-green" id="sum-gain">—</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="si-label">Heal Time</span>
+                        <span class="si-val" id="sum-time">—</span>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="chart-section hidden" id="chart-section">
+                    <h2 class="chart-title">Accuracy Comparison</h2>
+                    <div class="chart-wrapper">
+                        <canvas id="results-chart" aria-label="Accuracy comparison bar chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- About Section -->
+            <section class="about-section">
+                <h2 class="about-title">How It Works</h2>
+                <div class="about-grid">
+                    <div class="about-card">
+                        <div class="about-icon">🧠</div>
+                        <h3>CNN Architecture</h3>
+                        <p>A 3-block convolutional network trained on CIFAR-10 (10 classes). Achieves ~85%+ accuracy on the 10,000-image test set.</p>
+                    </div>
+                    <div class="about-card">
+                        <div class="about-icon">⚡</div>
+                        <h3>Fault Injection</h3>
+                        <p>Selected percentages of model weights are set to zero, simulating hardware memory failures or bit-flip errors in edge AI chips.</p>
+                    </div>
+                    <div class="about-card">
+                        <div class="about-icon">🔍</div>
+                        <h3>Fault Detection</h3>
+                        <p>Gradient-based analysis identifies which weights have negligible contribution (low gradient magnitude) — the signature of injected faults.</p>
+                    </div>
+                    <div class="about-card">
+                        <div class="about-icon">🩺</div>
+                        <h3>7 Healing Methods</h3>
+                        <p>From gradient re-initialisation to autoencoder reconstruction and neuron regrowth — multiple strategies target faults at different severities.</p>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <footer class="site-footer">
+            <p>SelfHealingNN · College Final Year Project · Built with PyTorch, FastAPI &amp; Vanilla JS</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

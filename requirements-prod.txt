@@ -1,0 +1,13 @@
+# Production dependencies only (no jupyter, no tensorboard, etc.)
+# PyTorch is installed separately from the CPU-only wheel index in the Dockerfile.
+# Do NOT list torch/torchvision here — they are pinned in the Dockerfile.
+
+fastapi==0.111.1
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+
+numpy>=1.24,<2.0
+pandas>=2.0
+matplotlib>=3.7
+Pillow>=10.0
+scikit-learn>=1.3

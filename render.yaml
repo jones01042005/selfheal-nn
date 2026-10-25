@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: selfhealingnn-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: FRONTEND_URL
+        sync: false         # Set this manually to your Vercel URL
+    healthCheckPath: /api/health
+    # Render free tier: 512 MB RAM, 0.5 vCPU, spins down after 15 min idle
+    # Cold-start with PyTorch: ~20-30s first request
