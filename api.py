@@ -3,17 +3,20 @@
 SelfHealingNN — FastAPI Backend
 Production-oriented API for CIFAR-10 fault injection and healing.
 
-The CNN is loaded at startup; autoencoders are loaded on demand.
-CIFAR-10 data loaders are initialized lazily on the first request that
-requires dataset evaluation or training-based healing.
+The CNN is loaded at startup; baseline dataset accuracy is evaluated in a
+background startup task, and autoencoders are loaded on demand.
+CIFAR-10 data loaders are initialized lazily when dataset evaluation or
+training-based healing requires them.
 """
 
+import asyncio
 import os
 import copy
 import time
 import threading
 import logging
 import io
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Optional
 
@@ -210,8 +213,9 @@ def _get_data_loaders(include_train=True):
     """
     Initialize the required CIFAR-10 data loaders on demand.
 
-    The baseline and fault endpoints need only validation data. Healing also
-    needs training data. Each loader is cached only after it initializes.
+    Startup baseline-accuracy and fault evaluation need only validation data.
+    Healing also needs training data. Each loader is cached only after it
+    initializes.
     """
     global _train_loader, _val_loader
 
@@ -272,6 +276,23 @@ def _get_data_loaders(include_train=True):
 
 _cached_baseline_acc: Optional[float] = None
 _baseline_lock = threading.Lock()
+_baseline_status_lock = threading.Lock()
+_baseline_start_lock = threading.Lock()
+_baseline_evaluation_status = "pending"
+_baseline_evaluation_error: Optional[str] = None
+_baseline_startup_started = False
+_baseline_startup_thread: Optional[threading.Thread] = None
+
+
+def _set_baseline_evaluation_status(
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    global _baseline_evaluation_status, _baseline_evaluation_error
+
+    with _baseline_status_lock:
+        _baseline_evaluation_status = status
+        _baseline_evaluation_error = error
 
 
 def _fast_evaluate(
@@ -341,55 +362,96 @@ def _get_baseline_acc() -> float:
 
     if _cached_baseline_acc is not None:
         log.info("Using cached baseline accuracy: %.2f%%", _cached_baseline_acc)
+        _set_baseline_evaluation_status("completed")
         return _cached_baseline_acc
 
-    _, val_loader = _get_data_loaders(include_train=False)
+    _set_baseline_evaluation_status("running")
 
-    with _baseline_lock:
-        if _cached_baseline_acc is None:
-            evaluation_started = time.perf_counter()
-            log.info(
-                "Baseline accuracy evaluation started "
-                "(max_batches=%d, inference_batch_size=%d)",
-                EVALUATION_MAX_BATCHES,
-                EVALUATION_INFERENCE_BATCH_SIZE,
-            )
-            try:
-                accuracy = _fast_evaluate(
-                    _baseline_cnn,
-                    val_loader,
-                    max_batches=EVALUATION_MAX_BATCHES,
+    try:
+        _, val_loader = _get_data_loaders(include_train=False)
+
+        with _baseline_lock:
+            if _cached_baseline_acc is None:
+                evaluation_started = time.perf_counter()
+                log.info(
+                    "Baseline accuracy evaluation started "
+                    "(max_batches=%d, inference_batch_size=%d)",
+                    EVALUATION_MAX_BATCHES,
+                    EVALUATION_INFERENCE_BATCH_SIZE,
                 )
-            except MemoryError as exc:
-                log.exception(
-                    "Baseline accuracy evaluation ran out of memory"
+                try:
+                    accuracy = _fast_evaluate(
+                        _baseline_cnn,
+                        val_loader,
+                        max_batches=EVALUATION_MAX_BATCHES,
+                    )
+                except MemoryError as exc:
+                    log.exception(
+                        "Baseline accuracy evaluation ran out of memory"
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "Baseline accuracy evaluation ran out of memory. "
+                            "Retry later or use an instance with more memory."
+                        ),
+                    ) from exc
+                except Exception as exc:
+                    log.exception("Baseline accuracy evaluation failed")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=(
+                            "Baseline accuracy evaluation failed. "
+                            "Check server logs for the traceback."
+                        ),
+                    ) from exc
+
+                _cached_baseline_acc = accuracy
+                log.info(
+                    "Baseline accuracy evaluation completed and cached: "
+                    "%.2f%% in %.2fs",
+                    _cached_baseline_acc,
+                    time.perf_counter() - evaluation_started,
                 )
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        "Baseline accuracy evaluation ran out of memory. "
-                        "Retry later or use an instance with more memory."
-                    ),
-                ) from exc
-            except Exception as exc:
-                log.exception("Baseline accuracy evaluation failed")
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "Baseline accuracy evaluation failed. "
-                        "Check server logs for the traceback."
-                    ),
-                ) from exc
+    except HTTPException as exc:
+        _set_baseline_evaluation_status("failed", str(exc.detail))
+        raise
+    except Exception as exc:
+        _set_baseline_evaluation_status("failed", str(exc))
+        raise
 
-            _cached_baseline_acc = accuracy
-            log.info(
-                "Baseline accuracy evaluation completed and cached: "
-                "%.2f%% in %.2fs",
-                _cached_baseline_acc,
-                time.perf_counter() - evaluation_started,
-            )
-
+    _set_baseline_evaluation_status("completed")
     return _cached_baseline_acc
+
+
+def _run_startup_baseline_evaluation() -> None:
+    try:
+        _get_baseline_acc()
+    except Exception:
+        log.exception("Startup baseline accuracy evaluation failed")
+
+
+def _start_baseline_evaluation() -> None:
+    global _baseline_startup_started, _baseline_startup_thread
+
+    with _baseline_start_lock:
+        if _baseline_startup_started:
+            return
+
+        _baseline_startup_started = True
+        _set_baseline_evaluation_status(
+            "completed" if _cached_baseline_acc is not None else "running"
+        )
+        _baseline_startup_thread = threading.Thread(
+            target=_run_startup_baseline_evaluation,
+            name="baseline-accuracy-evaluation",
+            daemon=True,
+        )
+        try:
+            _baseline_startup_thread.start()
+        except Exception as exc:
+            _set_baseline_evaluation_status("failed", str(exc))
+            log.exception("Could not start baseline accuracy evaluation thread")
 
 
 def _predict(model: nn.Module, image_tensor: torch.Tensor):
@@ -503,6 +565,12 @@ def _apply_healing(
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _start_baseline_evaluation()
+    yield
+
+
 app = FastAPI(
     title="SelfHealingNN API",
     description="Self-Healing Neural Network demonstration using CIFAR-10",
@@ -510,6 +578,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
 )
 
 _allowed_origins = [
@@ -567,12 +636,24 @@ async def health():
     """
     Lightweight health check.
 
-    Does not download CIFAR-10 or calculate model accuracy.
+    Does not download CIFAR-10. Baseline accuracy is evaluated in the
+    background after startup.
     """
+    with _baseline_status_lock:
+        baseline_status = _baseline_evaluation_status
+        baseline_error = _baseline_evaluation_error
+
     return {
         "status": "ok",
         "device": str(device),
         "baseline_checkpoint": os.path.isfile(MODEL_PATH),
+        "baseline_accuracy_status": baseline_status,
+        "baseline_accuracy": (
+            round(_cached_baseline_acc, 2)
+            if _cached_baseline_acc is not None
+            else None
+        ),
+        "baseline_accuracy_error": baseline_error,
         "autoencoders_available": _ae_available,
         "autoencoders_loaded": _ae_loaded,
         "data_loaders_initialized": (
@@ -768,7 +849,7 @@ async def run_heal(
     try:
         train_loader, val_loader = _get_data_loaders()
 
-        baseline_acc = _get_baseline_acc()
+        baseline_acc = await asyncio.to_thread(_get_baseline_acc)
         ratio = fault_ratio / 100.0
 
         # 1. Create a fresh faulty model.
