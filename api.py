@@ -637,44 +637,60 @@ async def methods():
     }
 
 
+
 @app.post("/api/baseline")
 async def run_baseline(image: UploadFile = File(...)):
     request_started = time.perf_counter()
     log.info("Baseline request received")
 
+    # 1. Read the uploaded image
     read_started = time.perf_counter()
     file_bytes = await image.read()
+
     log.info(
         "Baseline image received (%d bytes) in %.2fs",
         len(file_bytes),
         time.perf_counter() - read_started,
     )
 
+    # 2. Decode the image
     decode_started = time.perf_counter()
     image_tensor = _decode_image(file_bytes)
+
     log.info(
         "Baseline image decoding completed in %.2fs",
         time.perf_counter() - decode_started,
     )
 
-    baseline_acc = _get_baseline_acc()
+    # 3. Predict using the pretrained baseline CNN
     prediction_started = time.perf_counter()
     label, confidence = _predict(_baseline_cnn, image_tensor)
+
     log.info(
         "Baseline image prediction completed in %.2fs",
         time.perf_counter() - prediction_started,
     )
+
+    # 4. Return cached accuracy only.
+    # Do not evaluate the dataset during image prediction.
+    baseline_accuracy = _cached_baseline_acc
+
+    # 5. Log total request time
     log.info(
         "Baseline request completed in %.2fs",
         time.perf_counter() - request_started,
     )
 
+    # 6. Return the prediction and available accuracy
     return {
-        "accuracy": round(baseline_acc, 2),
+        "accuracy": (
+            round(baseline_accuracy, 2)
+            if baseline_accuracy is not None
+            else None
+        ),
         "prediction": label,
         "confidence": confidence,
     }
-
 
 @app.post("/api/fault")
 async def run_fault(

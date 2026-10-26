@@ -211,7 +211,7 @@ function initChart() {
 }
 
 function setChartBar(index, value) {
-    if (!resultsChart) return;
+    if (!resultsChart || value === null || value === undefined) return;
     resultsChart.data.datasets[0].data[index] = value;
     resultsChart.update();
 }
@@ -332,7 +332,7 @@ btnBaseline.addEventListener('click', async () => {
     btnHeal.disabled     = true;
 
     resetResults();
-    showStatus('Evaluating baseline CNN on CIFAR-10 validation set…');
+    showStatus('Classifying image with baseline CNN…');
     initChart();
     chartSection.classList.remove('hidden');
 
@@ -340,7 +340,7 @@ btnBaseline.addEventListener('click', async () => {
         const data = await apiPost('/api/baseline', buildFormData());
         _baselineAccVal = data.accuracy;
 
-        baselineAcc.textContent  = data.accuracy + '%';
+        baselineAcc.textContent  = data.accuracy == null ? '—' : data.accuracy + '%';
         baselinePred.textContent = data.prediction;
         activateCard(cardBaseline);
         setChartBar(0, data.accuracy);

@@ -95,10 +95,17 @@ print("\n[4] Baseline Endpoint")
 try:
     data, code = post_multipart("/api/baseline", {}, IMG)
     check("HTTP 200 OK",         code == 200, f"got {code}")
-    check("accuracy returned",   'accuracy' in data and float(data['accuracy']) > 0)
+    check(
+        "accuracy returned or unavailable",
+        'accuracy' in data and (
+            data['accuracy'] is None or isinstance(data['accuracy'], (int, float))
+        ),
+    )
     check("prediction returned", 'prediction' in data)
     check("confidence returned", 'confidence' in data)
-    print(f"     Baseline accuracy: {data.get('accuracy')}%  |  Prediction: {data.get('prediction')}")
+    accuracy = data.get('accuracy')
+    accuracy_display = f"{accuracy}%" if accuracy is not None else "unavailable"
+    print(f"     Baseline accuracy: {accuracy_display}  |  Prediction: {data.get('prediction')}")
 except Exception as e:
     check("Baseline endpoint", False, str(e))
 
@@ -142,19 +149,66 @@ except Exception as e:
 # ── Test 7: Concurrent Lock ─────────────────────────────────────────
 print("\n[7] Concurrent Request Rejection")
 import threading
-lock_results = []
-def _heal():
-    try:
-        d, c = post_multipart("/api/heal", {"fault_ratio": "10", "method": "gradient"}, IMG)
-        lock_results.append(c)
-    except:
-        lock_results.append(0)
+from unittest.mock import patch
+from fastapi.testclient import TestClient
+import api
 
-t1 = threading.Thread(target=_heal)
-t2 = threading.Thread(target=_heal)
-t1.start(); time.sleep(0.5); t2.start()
-t1.join(); t2.join()
-check("At least one 429 returned when concurrent", 429 in lock_results, str(lock_results))
+first_request_entered = threading.Event()
+release_first_request = threading.Event()
+first_response = []
+first_errors = []
+with open(IMG, "rb") as image_file:
+    image_bytes = image_file.read()
+
+def _pause_after_lock_acquired(*args, **kwargs):
+    first_request_entered.set()
+    if not release_first_request.wait(timeout=30):
+        raise TimeoutError("Timed out waiting to release the first heal request")
+    raise api.HTTPException(status_code=503, detail="Stopped by concurrency test")
+
+with TestClient(api.app) as first_client, TestClient(api.app) as second_client:
+    def _first_heal():
+        try:
+            response = first_client.post(
+                "/api/heal",
+                data={"fault_ratio": "10", "method": "gradient"},
+                files={"image": ("OIP.jpeg", image_bytes, "image/jpeg")},
+            )
+            first_response.append(response.status_code)
+        except Exception as exc:
+            first_errors.append(exc)
+
+    first_thread = threading.Thread(target=_first_heal)
+    with patch.object(api, "_get_data_loaders", _pause_after_lock_acquired):
+        try:
+            first_thread.start()
+            if not first_request_entered.wait(timeout=10):
+                raise TimeoutError(
+                    "First heal request did not reach the post-lock data-loader helper"
+                )
+
+            second_response = second_client.post(
+                "/api/heal",
+                data={"fault_ratio": "10", "method": "gradient"},
+                files={"image": ("OIP.jpeg", image_bytes, "image/jpeg")},
+            )
+            check(
+                "Second request rejected while first holds lock",
+                second_response.status_code == 429,
+                f"got {second_response.status_code}",
+            )
+        except Exception as exc:
+            check("Second request rejected while first holds lock", False, str(exc))
+        finally:
+            release_first_request.set()
+            if first_thread.ident is not None:
+                first_thread.join(timeout=15)
+
+    check(
+        "First request released the experiment lock",
+        not first_thread.is_alive() and first_response == [503] and not first_errors,
+        f"responses={first_response}, errors={first_errors}, alive={first_thread.is_alive()}",
+    )
 
 # ── Summary ─────────────────────────────────────────────────────────
 print("\n" + "="*50)
