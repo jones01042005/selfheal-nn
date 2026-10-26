@@ -166,7 +166,11 @@ def _pause_after_lock_acquired(*args, **kwargs):
         raise TimeoutError("Timed out waiting to release the first heal request")
     raise api.HTTPException(status_code=503, detail="Stopped by concurrency test")
 
-with TestClient(api.app) as first_client, TestClient(api.app) as second_client:
+with (
+    patch.object(api, "_start_baseline_evaluation"),
+    TestClient(api.app) as first_client,
+    TestClient(api.app) as second_client,
+):
     def _first_heal():
         try:
             response = first_client.post(

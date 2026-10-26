@@ -74,6 +74,7 @@ let resultsChart   = null;
 // Cached results across steps
 let _baselineAccVal = null;
 let _faultAccVal    = null;
+let _baselinePollGeneration = 0;
 
 // ── Image Upload ─────────────────────────────────────────────────
 let selectedFile = null;
@@ -243,6 +244,7 @@ function activateCard(card) {
 }
 
 function resetResults() {
+    _baselinePollGeneration++;
     [cardBaseline, cardFault, cardHealed].forEach(c => {
         c.classList.remove('active');
         c.classList.add('pending');
@@ -324,6 +326,35 @@ async function apiPost(path, formData) {
     return data;
 }
 
+async function refreshBaselineAccuracy(generation) {
+    if (generation !== _baselinePollGeneration) return;
+
+    try {
+        const response = await fetch(API_BASE + '/api/health');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const health = await response.json();
+        if (generation !== _baselinePollGeneration) return;
+
+        if (typeof health.baseline_accuracy === 'number') {
+            _baselineAccVal = health.baseline_accuracy;
+            baselineAcc.textContent = health.baseline_accuracy + '%';
+            setChartBar(0, health.baseline_accuracy);
+            return;
+        }
+
+        if (health.baseline_accuracy_status === 'failed') {
+            baselineAcc.textContent = 'Unavailable';
+            return;
+        }
+    } catch (error) {
+        console.error('Unable to refresh baseline accuracy status:', error);
+    }
+
+    window.setTimeout(() => refreshBaselineAccuracy(generation), 2000);
+}
+
 // ── Step 1: Baseline ──────────────────────────────────────────────
 btnBaseline.addEventListener('click', async () => {
     if (!selectedFile) return;
@@ -338,12 +369,19 @@ btnBaseline.addEventListener('click', async () => {
 
     try {
         const data = await apiPost('/api/baseline', buildFormData());
-        _baselineAccVal = data.accuracy;
-
-        baselineAcc.textContent  = data.accuracy == null ? '—' : data.accuracy + '%';
+        if (data.accuracy == null) {
+            _baselineAccVal = null;
+            baselineAcc.textContent = 'Preparing…';
+            const generation = ++_baselinePollGeneration;
+            void refreshBaselineAccuracy(generation);
+        } else {
+            _baselinePollGeneration++;
+            _baselineAccVal = data.accuracy;
+            baselineAcc.textContent = data.accuracy + '%';
+            setChartBar(0, data.accuracy);
+        }
         baselinePred.textContent = data.prediction;
         activateCard(cardBaseline);
-        setChartBar(0, data.accuracy);
 
         btnFault.disabled = false;
         hideStatus();

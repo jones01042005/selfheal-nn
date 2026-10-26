@@ -50,10 +50,14 @@ An interactive demonstration of **self-healing neural network techniques** appli
 
 Baseline accuracy: **~85%** on CIFAR-10 test set.
 
-The API loads only the validation dataset for baseline/fault evaluation and
-loads the training dataset only for healing. CIFAR-10 is prepared in the
-container image, not downloaded during a request. Baseline, faulty, and healed
-accuracy use the same first 10 validation batches (1,280 samples) to limit
+The API evaluates baseline accuracy on the validation dataset in a background
+task after startup; this does not delay server startup or image prediction.
+`/api/health` reports `baseline_accuracy_status` (`pending`, `running`,
+`completed`, or `failed`), the cached `baseline_accuracy`, and any
+`baseline_accuracy_error`. Fault evaluation also uses only validation data,
+and the training dataset is loaded only for healing. CIFAR-10 is prepared in
+the container image, not downloaded during a request. Baseline, faulty, and
+healed accuracy use the same first 10 validation batches (1,280 samples) to limit
 CPU-bound request time on small instances. Inference is chunked into groups of
 16 and uses `torch.inference_mode()` to reduce inference overhead and peak
 memory. Accuracy is calculated over all evaluated samples; this smaller,
@@ -192,7 +196,7 @@ Vercel supports Python functions, but this API loads PyTorch, model checkpoints,
 
 The service's `PORT` is supplied by Render and the container listens on it. Local API startup used approximately 486 MB RSS on this machine; this is not a container measurement, but it signals little headroom on a 512 MB plan, especially during experiments. Confirm capacity before deployment; no hosted deployment has been performed or verified from this workspace.
 
-> **Note**: Free services may spin down after inactivity. Cold starts and memory availability depend on the current plan.
+> **Note**: Free services may spin down after 15 minutes without inbound traffic and take about a minute to spin back up. Baseline dataset evaluation starts in the background on every process start, so it does not delay the server becoming available, but its CPU and memory use may overlap with cold-start requests. The in-memory accuracy cache is recalculated after each restart or spin-up.
 
 ### Alternative Platforms
 - **Railway** (`railway.app`) — similar Docker support, $5/mo hobby plan
